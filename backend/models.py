@@ -13,3 +13,9 @@ class TradeOrder(Base):
     status = Column(String, default="open")  # "open" or "closed"
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     closed_at = Column(DateTime, nullable=True)
+
+class Account(Base):
+    __tablename__ = "account"
+    id = Column(Integer, primary_key=True, index=True)
+    cash_balance = Column(Float, default=10000.0)
+    btc_balance = Column(Float, default=0.5)

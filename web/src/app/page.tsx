@@ -10,19 +10,65 @@ type Position = {
   timestamp: string,
 }
 
+type OrderDto = {
+  id: number,
+  type: string,
+  price: number,
+  amount: number,
+  created_at: string,
+  closed_at: string,
+  status: string,
+}
+
 const BitcoinTradingApp = () => {
-  const [btcPrice, setBtcPrice] = useState(63452.18);
+  const [btcPrice, setBtcPrice] = useState(0);
   const [priceDirection, setPriceDirection] = useState('');
   const [account, setAccount] = useState({ usdt: 10000, btc: 0.5 });
-  const [openPositions, setOpenPositions] = useState<Position[]>([
-    { id: 1, type: 'buy', price: 62100.25, amount: 0.2, timestamp: new Date().toISOString() },
-    { id: 2, type: 'sell', price: 63200.50, amount: 0.1, timestamp: new Date().toISOString() }
-  ]);
-  const [history, setHistory] = useState([
-    { id: 1, type: 'buy', price: 61000.75, amount: 0.3, status: 'closed', timestamp: new Date(Date.now() - 86400000).toISOString() },
-    { id: 2, type: 'sell', price: 61500.50, amount: 0.3, status: 'closed', timestamp: new Date(Date.now() - 43200000).toISOString() }
-  ]);
+  const [openPositions, setOpenPositions] = useState<Position[]>([]);
+  const [history, setHistory] = useState([]);
   const [activeTab, setActiveTab] = useState('positions');
+
+  useEffect(() => {
+    const fetchOrders = async () => {
+      try {
+        const response = await fetch("http://localhost:8000/orders");
+          if (!response.ok) {
+          throw new Error("Failed to fetch orders");
+        }
+        const data = await response.json();
+        // Map orders to your Position type:
+        // For open orders, use created_at as the timestamp.
+        // For closed orders, use closed_at as the timestamp.
+        const openPositions = data
+          .filter((order: OrderDto) => order.status === "open")
+          .map((order: OrderDto) => ({
+            id: order.id,
+            type: order.type,
+            price: order.price,
+            amount: order.amount,
+            timestamp: order.created_at,
+          }));
+
+    const closedPositions = data
+          .filter((order: OrderDto) => order.status === "closed")
+          .map((order: OrderDto) => ({
+            id: order.id,
+            type: order.type,
+            price: order.price,
+            amount: order.amount,
+            timestamp: order.closed_at,
+          }));
+
+    setOpenPositions(openPositions);
+    setHistory(closedPositions);
+      } catch (error) {
+        console.error("Error fetching orders:", error);
+      }
+    };
+
+    // Fetch immediately on component mount
+    fetchOrders();
+  }, []);
 
   useEffect(() => {
     const fetchPrice = async () => {
@@ -45,6 +91,21 @@ const BitcoinTradingApp = () => {
       }
     };
 
+    const fetchAccount = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/account');
+          const data = await response.json();
+
+        setAccount({
+          usdt: parseFloat(parseFloat(data["cash_balance"]).toFixed(2)),
+          btc: parseFloat(parseFloat(data["btc_balance"]).toFixed(8)),
+        });
+      } catch (error) {
+        console.error('Error fetching price:', error);
+      }
+    };
+
+    fetchAccount();
     fetchPrice();
 
     // Set interval to fetch the price every 10 seconds
@@ -53,28 +114,34 @@ const BitcoinTradingApp = () => {
 
   }, []);
 
-  const handleBuy = () => {
-    // Simple implementation - buy 0.01 BTC at current price
+  const handleBuy = async () => {
     const amount = 0.01;
-    const cost = amount * btcPrice;
-    
-    if (account.usdt >= cost) {
-      const newTransaction = {
-        id: Date.now(),
-        type: 'buy',
-        price: btcPrice,
-        amount: amount,
-        timestamp: new Date().toISOString()
-      };
-      
-      setOpenPositions([newTransaction, ...openPositions]);
-      setAccount({
-        usdt: parseFloat((account.usdt - cost).toFixed(2)),
-        btc: parseFloat((account.btc + amount).toFixed(8))
+
+    try {
+      const response = await fetch("http://localhost:8000/trade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "buy", amount }),
       });
+
+
+      if (!response.ok) {
+        throw new Error("Trade failed");
+      }
+
+      const data = await response.json();
+
+      setOpenPositions([{ type: "buy", amount, id: data.order_id, price: data.price, timestamp: data.timestamp }, ...openPositions]);
+      setAccount({
+        usdt: parseFloat(parseFloat(data["account"]["cash_balance"]).toFixed(2)),
+        btc: parseFloat(parseFloat(data["account"]["btc_balance"]).toFixed(8)),
+      });
+
+    } catch (error) {
+      console.error("Buy failed:", error);
     }
   };
-  
+
   const handleSell = () => {
     // Simple implementation - sell 0.01 BTC at current price
     const amount = 0.01;
@@ -135,7 +202,7 @@ const BitcoinTradingApp = () => {
       <div className="flex flex-col items-center justify-center my-16">
         <h2 className="text-xl">Bitcoin Price (USDT)</h2>
         <p className={`text-6xl font-bold transition-colors ${getPriceClass()}`}>
-          ${btcPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          ${btcPrice > 0 ? btcPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
         </p>
       </div>
       

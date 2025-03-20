@@ -4,8 +4,6 @@ import os
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-
-
 from pydantic import BaseModel
 from typing import List
 
@@ -18,7 +16,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 # Import configuration and models
 import config
-from models import Base, TradeOrder
+from models import Base, TradeOrder, Account
+
 
 app = FastAPI()
 
@@ -59,19 +58,33 @@ class TradeOrderResponse(BaseModel):
     created_at: datetime.datetime
     closed_at: datetime.datetime = None
 
+class AccountResponse(BaseModel):
+    cash_balance: float
+    btc_balance: float
+
 @app.on_event("startup")
 async def startup():
     # Create PostgreSQL tables if they don't exist
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    # Initialize account if it doesn't exist
+    async with async_session() as session:
+        result = await session.execute(select(Account))
+        account = result.scalars().first()
+        if not account:
+            account = Account(cash_balance=10000.0, btc_balance=0.5)
+            session.add(account)
+            await session.commit()
+
 async def fetch_live_price() -> float:
     """
-    Fetches the live Bitcoin price without caching.
+    Fetches the live Bitcoin price using the updated Coindesk API endpoint.
     """
+    url = "https://data-api.coindesk.com/index/cc/v1/latest/tick?market=cadli&instruments=BTC-USD"
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get("https://data-api.coindesk.com/index/cc/v1/latest/tick?market=cadli&instruments=BTC-USD", timeout=10.0)
+            response = await client.get(url, timeout=10.0)
             data = response.json()
             price = float(data["Data"]["BTC-USD"]["VALUE"])
         except Exception as e:
@@ -120,15 +133,41 @@ async def get_order_history():
 async def create_trade(trade: TradeRequest, background_tasks: BackgroundTasks):
     """
     Creates a new trade order at the current live price.
-    Saves the order in PostgreSQL, logs the action in MongoDB, and invalidates the cached order history.
+    Saves the order in PostgreSQL, updates the account accordingly, logs the action in MongoDB,
+    and invalidates the cached order history.
     """
     price = await fetch_live_price()
 
     async with async_session() as session:
+        # Fetch the account (assumes a single account exists)
+        result = await session.execute(select(Account))
+        account = result.scalars().first()
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not initialized")
+
+        # Calculate the trade value
+        trade_value = trade.amount * price
+
+        # Update account based on trade type
+        if trade.type.lower() == "buy":
+            if account.cash_balance < trade_value:
+                raise HTTPException(status_code=400, detail="Insufficient cash balance")
+            account.cash_balance -= trade_value
+            account.btc_balance += trade.amount
+        elif trade.type.lower() == "sell":
+            if account.btc_balance < trade.amount:
+                raise HTTPException(status_code=400, detail="Insufficient BTC balance")
+            account.cash_balance += trade_value
+            account.btc_balance -= trade.amount
+        else:
+            raise HTTPException(status_code=400, detail="Invalid trade type")
+
+        # Create the trade order
         new_order = TradeOrder(type=trade.type, amount=trade.amount, price=price)
         session.add(new_order)
         await session.commit()
         await session.refresh(new_order)
+        await session.refresh(account)
 
     log_entry = {
         "order_id": new_order.id,
@@ -142,7 +181,13 @@ async def create_trade(trade: TradeRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(trade_logs_collection.insert_one, log_entry)
     background_tasks.add_task(invalidate_order_cache)
 
-    return {"order_id": new_order.id, "price": price}
+    return {
+        "order_id": new_order.id,
+        "price": price,
+        "timestamp": new_order.created_at,
+        "account": {"cash_balance": account.cash_balance, "btc_balance": account.btc_balance}
+    }
+
 
 @app.post("/close")
 async def close_trade(close_req: CloseRequest, background_tasks: BackgroundTasks):
@@ -172,3 +217,16 @@ async def close_trade(close_req: CloseRequest, background_tasks: BackgroundTasks
     background_tasks.add_task(invalidate_order_cache)
 
     return {"order_id": order.id, "status": order.status}
+
+@app.get("/account", response_model=AccountResponse)
+async def get_account():
+    """
+    Returns the account details including cash balance and BTC holdings.
+    """
+    async with async_session() as session:
+        result = await session.execute(select(Account))
+        account = result.scalars().first()
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not initialized")
+        return {"cash_balance": account.cash_balance, "btc_balance": account.btc_balance}
+
