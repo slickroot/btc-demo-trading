@@ -15,7 +15,7 @@ class TradeOrder(Base):
     closed_at = Column(DateTime, nullable=True)
 
 class Account(Base):
-    __tablename__ = "account"
+    __tablename__ = "accounts"
     id = Column(Integer, primary_key=True, index=True)
-    cash_balance = Column(Float, default=10000.0)
-    btc_balance = Column(Float, default=0.5)
+    cash_balance = Column(Float, default=10000.0) # Start with $10k
+    btc_balance = Column(Float, default=0.5) # and half a BTC

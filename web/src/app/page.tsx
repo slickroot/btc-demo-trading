@@ -184,6 +184,10 @@ const BitcoinTradingApp = () => {
       // Remove the closed position from openPositions
       const updatedPositions = openPositions.filter((p) => p.id !== position.id);
       setOpenPositions(updatedPositions);
+      setAccount({
+        usdt: parseFloat(parseFloat(data["account"]["cash_balance"]).toFixed(2)),
+        btc: parseFloat(parseFloat(data["account"]["btc_balance"]).toFixed(8)),
+      });
 
       // Add the closed position to history; update timestamp if needed
       const closedPosition = { ...position, status: "closed", timestamp: data.timestamp };

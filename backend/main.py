@@ -1,25 +1,12 @@
-import datetime
-import json
-import os
-
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List
+from sqlalchemy.ext.asyncio import AsyncSession
+from config import engine, async_session
+from models.db_models import Base
+from repositories.account_repo import AccountRepository
+from api.endpoints import account, orders, price
 
-import httpx
-import redis.asyncio as redis
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import select
-from motor.motor_asyncio import AsyncIOMotorClient
-
-# Import configuration and models
-import config
-from models import Base, TradeOrder, Account
-
-
-app = FastAPI()
+app = FastAPI(title="Crypto Trading API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,38 +16,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Setup Redis client using our config
-redis_client = redis.from_url(config.REDIS_URL)
-
-# Setup SQLAlchemy engine and session
-engine = create_async_engine(config.DATABASE_URL, echo=False)
-async_session = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-
-# Setup MongoDB client for trade logs
-mongo_client = AsyncIOMotorClient(config.MONGO_URL)
-mongo_db = mongo_client.trading
-trade_logs_collection = mongo_db.trade_logs
-
-# Pydantic models for request bodies and responses
-class TradeRequest(BaseModel):
-    type: str  # "buy" or "sell"
-    amount: float
-
-class CloseRequest(BaseModel):
-    order_id: int
-
-class TradeOrderResponse(BaseModel):
-    id: int
-    type: str
-    amount: float
-    price: float
-    status: str
-    created_at: datetime.datetime
-    closed_at: datetime.datetime = None
-
-class AccountResponse(BaseModel):
-    cash_balance: float
-    btc_balance: float
+# Register API endpoints
+app.include_router(account.router)
+app.include_router(orders.router)
+app.include_router(price.router)
 
 @app.on_event("startup")
 async def startup():
@@ -70,194 +29,11 @@ async def startup():
 
     # Initialize account if it doesn't exist
     async with async_session() as session:
-        result = await session.execute(select(Account))
-        account = result.scalars().first()
+        account_repo = AccountRepository(session)
+        account = await account_repo.get_account()
         if not account:
-            account = Account(cash_balance=10000.0, btc_balance=0.5)
-            session.add(account)
-            await session.commit()
+            await account_repo.create_account()
 
-async def fetch_live_price() -> float:
-    """
-    Fetches the live Bitcoin price using the updated Coindesk API endpoint.
-    """
-    url = "https://data-api.coindesk.com/index/cc/v1/latest/tick?market=cadli&instruments=BTC-USD"
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(url, timeout=10.0)
-            data = response.json()
-            price = float(data["Data"]["BTC-USD"]["VALUE"])
-        except Exception as e:
-            raise HTTPException(status_code=500, detail="Error fetching live price")
-    return price
-
-@app.get("/price")
-async def get_price():
-    price = await fetch_live_price()
-    return {"price": price}
-
-async def invalidate_order_cache():
-    await redis_client.delete("order_history")
-
-@app.get("/orders", response_model=List[TradeOrderResponse])
-async def get_order_history():
-    """
-    Returns the list of all trade orders.
-    Checks Redis for cached data, if not found queries PostgreSQL and caches the result.
-    """
-    cached = await redis_client.get("order_history")
-    if cached:
-        orders = json.loads(cached)
-        return orders
-
-    async with async_session() as session:
-        result = await session.execute(select(TradeOrder))
-        orders_objs = result.scalars().all()
-        orders = [
-            {
-                "id": order.id,
-                "type": order.type,
-                "amount": order.amount,
-                "price": order.price,
-                "status": order.status,
-                "created_at": order.created_at.isoformat(),
-                "closed_at": order.closed_at.isoformat() if order.closed_at else None,
-            }
-            for order in orders_objs
-        ]
-    # Cache the order history as JSON for 30 seconds
-    await redis_client.set("order_history", json.dumps(orders), ex=30)
-    return orders
-
-@app.post("/trade")
-async def create_trade(trade: TradeRequest, background_tasks: BackgroundTasks):
-    """
-    Creates a new trade order at the current live price.
-    Saves the order in PostgreSQL, updates the account accordingly, logs the action in MongoDB,
-    and invalidates the cached order history.
-    """
-    price = await fetch_live_price()
-
-    async with async_session() as session:
-        # Fetch the account (assumes a single account exists)
-        result = await session.execute(select(Account))
-        account = result.scalars().first()
-        if not account:
-            raise HTTPException(status_code=404, detail="Account not initialized")
-
-        # Calculate the trade value
-        trade_value = trade.amount * price
-
-        # Update account based on trade type
-        if trade.type.lower() == "buy":
-            if account.cash_balance < trade_value:
-                raise HTTPException(status_code=400, detail="Insufficient cash balance")
-            account.cash_balance -= trade_value
-            account.btc_balance += trade.amount
-        elif trade.type.lower() == "sell":
-            if account.btc_balance < trade.amount:
-                raise HTTPException(status_code=400, detail="Insufficient BTC balance")
-            account.cash_balance += trade_value
-            account.btc_balance -= trade.amount
-        else:
-            raise HTTPException(status_code=400, detail="Invalid trade type")
-
-        # Create the trade order
-        new_order = TradeOrder(type=trade.type, amount=trade.amount, price=price)
-        session.add(new_order)
-        await session.commit()
-        await session.refresh(new_order)
-        await session.refresh(account)
-
-    log_entry = {
-        "order_id": new_order.id,
-        "action": "create",
-        "type": trade.type,
-        "amount": trade.amount,
-        "price": price,
-        "status": "open",
-        "timestamp": datetime.datetime.utcnow()
-    }
-    background_tasks.add_task(trade_logs_collection.insert_one, log_entry)
-    background_tasks.add_task(invalidate_order_cache)
-
-    return {
-        "order_id": new_order.id,
-        "price": price,
-        "timestamp": new_order.created_at,
-        "account": {"cash_balance": account.cash_balance, "btc_balance": account.btc_balance}
-    }
-
-@app.post("/close")
-async def close_trade(close_req: CloseRequest, background_tasks: BackgroundTasks):
-    """
-    Closes an open trade order.
-    Updates its status in PostgreSQL, updates the account accordingly,
-    logs the closure in MongoDB, and invalidates the cached order history.
-    """
-    current_price = await fetch_live_price()
-
-    async with async_session() as session:
-        # Retrieve the open order
-        result = await session.execute(
-            select(TradeOrder).where(TradeOrder.id == close_req.order_id, TradeOrder.status == "open")
-        )
-        order = result.scalar_one_or_none()
-        if order is None:
-            raise HTTPException(status_code=404, detail="Open order not found")
-
-        # Fetch the account (assumes a single account exists)
-        result_account = await session.execute(select(Account))
-        account = result_account.scalars().first()
-        if not account:
-            raise HTTPException(status_code=404, detail="Account not found")
-
-        # Update the account based on the type of order
-        if order.type.lower() == "buy":
-            # Closing a buy order means selling the held BTC at current price
-            account.cash_balance += order.amount * current_price
-            account.btc_balance -= order.amount
-        elif order.type.lower() == "sell":
-            # Closing a sell order means buying back BTC at current price
-            account.cash_balance -= order.amount * current_price
-            account.btc_balance += order.amount
-        else:
-            raise HTTPException(status_code=400, detail="Invalid trade type")
-
-        # Mark the order as closed
-        order.status = "closed"
-        order.closed_at = datetime.datetime.utcnow()
-
-        await session.commit()
-        await session.refresh(order)
-        await session.refresh(account)
-
-    log_entry = {
-        "order_id": order.id,
-        "action": "close",
-        "timestamp": datetime.datetime.utcnow(),
-        "close_price": current_price,
-    }
-    background_tasks.add_task(trade_logs_collection.insert_one, log_entry)
-    background_tasks.add_task(invalidate_order_cache)
-
-    return {
-        "order_id": order.id,
-        "status": order.status,
-        "timestamp": order.closed_at,
-        "account": {"cash_balance": account.cash_balance, "btc_balance": account.btc_balance},
-        "close_price": current_price,
-    }
-
-@app.get("/account", response_model=AccountResponse)
-async def get_account():
-    """
-    Returns the account details including cash balance and BTC holdings.
-    """
-    async with async_session() as session:
-        result = await session.execute(select(Account))
-        account = result.scalars().first()
-        if not account:
-            raise HTTPException(status_code=404, detail="Account not initialized")
-        return {"cash_balance": account.cash_balance, "btc_balance": account.btc_balance}
-
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
