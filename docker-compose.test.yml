@@ -1,0 +1,15 @@
+services:
+  tests:
+    build: ./backend
+    command: poetry run pytest --maxfail=1 -q
+    depends_on:
+      - postgres
+      - redis
+      - mongo
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: trading
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      MONGO_HOST: mongo
