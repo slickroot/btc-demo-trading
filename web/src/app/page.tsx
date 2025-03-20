@@ -25,22 +25,33 @@ const BitcoinTradingApp = () => {
   const [activeTab, setActiveTab] = useState('positions');
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      const change = (Math.random() > 0.5 ? 1 : -1) * (Math.random() * 100);
-      const newPrice = parseFloat((btcPrice + change).toFixed(2));
-      
-      // Set price direction for color change
-      setPriceDirection(change > 0 ? 'up' : 'down');
-      setBtcPrice(newPrice);
-      
-      // Reset price direction after 500ms
-      setTimeout(() => {
-        setPriceDirection('');
-      }, 500);
-    }, 1000);
-    
+    const fetchPrice = async () => {
+      try {
+        const response = await fetch('http://localhost:8000/price');
+        const data = await response.json();
+        const newPrice = parseFloat(parseFloat(data.price).toFixed(2));
+
+        // Determine the price change direction
+        const change = newPrice - btcPrice;
+        setPriceDirection(change > 0 ? 'up' : (change < 0 ? 'down' : ''));
+        setBtcPrice(newPrice);
+
+        // Reset price direction after 500ms for the color change effect
+        setTimeout(() => {
+          setPriceDirection('');
+        }, 500);
+      } catch (error) {
+        console.error('Error fetching price:', error);
+      }
+    };
+
+    fetchPrice();
+
+    // Set interval to fetch the price every 10 seconds
+    const interval = setInterval(fetchPrice, 10000);
     return () => clearInterval(interval);
-  }, [btcPrice]);
+
+  }, []);
 
   const handleBuy = () => {
     // Simple implementation - buy 0.01 BTC at current price
