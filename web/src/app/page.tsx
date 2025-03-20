@@ -111,8 +111,8 @@ const BitcoinTradingApp = () => {
     fetchAccount();
     fetchPrice();
 
-    // Set interval to fetch the price every 10 seconds
-    const interval = setInterval(fetchPrice, 10000);
+    // Set interval to fetch the price every 5 seconds
+    const interval = setInterval(fetchPrice, 5000);
     return () => clearInterval(interval);
 
   }, []);
@@ -145,25 +145,31 @@ const BitcoinTradingApp = () => {
     }
   };
 
-  const handleSell = () => {
-    // Simple implementation - sell 0.01 BTC at current price
+  const handleSell = async () => {
     const amount = 0.01;
-    const revenue = amount * btcPrice;
-    
-    if (account.btc >= amount) {
-      const newTransaction = {
-        id: Date.now(),
-        type: 'sell',
-        price: btcPrice,
-        amount: amount,
-        timestamp: new Date().toISOString()
-      };
-      
-      setOpenPositions([newTransaction, ...openPositions]);
-      setAccount({
-        usdt: parseFloat((account.usdt + revenue).toFixed(2)),
-        btc: parseFloat((account.btc - amount).toFixed(8))
+
+    try {
+      const response = await fetch("http://localhost:8000/trade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "sell", amount }),
       });
+
+
+      if (!response.ok) {
+        throw new Error("Trade failed");
+      }
+
+      const data = await response.json();
+
+      setOpenPositions([{ type: "sell", amount, id: data.order_id, price: data.price, timestamp: data.timestamp }, ...openPositions]);
+      setAccount({
+        usdt: parseFloat(parseFloat(data["account"]["cash_balance"]).toFixed(2)),
+        btc: parseFloat(parseFloat(data["account"]["btc_balance"]).toFixed(8)),
+      });
+
+    } catch (error) {
+      console.error("Sell failed:", error);
     }
   };
  
@@ -180,7 +186,6 @@ const BitcoinTradingApp = () => {
       }
       const data = await response.json();
 
-      console.log("Closed", data)
       // Remove the closed position from openPositions
       const updatedPositions = openPositions.filter((p) => p.id !== position.id);
       setOpenPositions(updatedPositions);
