@@ -1,5 +1,9 @@
 {
   "name": "web",
+  "author": {
+    "name": "Marouane Elaich", 
+    "email": "elaich@gmx.net"
+  },
   "version": "0.1.0",
   "private": true,
   "scripts": {
