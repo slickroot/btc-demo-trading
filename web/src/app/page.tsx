@@ -202,7 +202,7 @@ const BitcoinTradingApp = () => {
   };
 
   return (
-    <div className="bg-gray-900 text-gray-200 min-h-screen p-6">
+    <div className="bg-gray-900 text-gray-200 min-h-screen p-6 flex flex-col justify-between">
       {/* Price Display */}
       <div className="flex flex-col items-center justify-center my-16">
         <h2 className="text-xl">Bitcoin Price (USDT)</h2>
@@ -228,11 +228,11 @@ const BitcoinTradingApp = () => {
           SELL
         </button>
       </div>
-      
-      {/* Tabbed Interface */}
-      <div className="mt-8 bg-gray-800 rounded shadow">
+
+      {/* Orders Table - Fixed at Bottom */}
+      <div className="w-full border-t border-gray-700 bg-gray-800">
         {/* Tab Navigation */}
-        <div className="flex border-b border-gray-700">
+        <div className="flex border-b border-gray-700 px-6">
           <button
             className={`px-6 py-3 text-sm font-medium ${activeTab === 'positions' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}
             onClick={() => setActiveTab('positions')}
@@ -248,34 +248,34 @@ const BitcoinTradingApp = () => {
         </div>
         
         {/* Tab Content */}
-        <div className="p-4">
+        <div className="p-6">
           {activeTab === 'positions' && (
             <div>
               <h3 className="text-lg font-medium mb-3">Open Positions</h3>
-              <div className="overflow-y-auto max-h-64">
+              <div className="overflow-auto" style={{ height: '250px', scrollbarWidth: 'thin', scrollbarColor: '#4B5563 #1F2937' }}>
                 <table className="w-full">
-                  <thead>
+                  <thead className="sticky top-0 bg-gray-800">
                     <tr className="text-gray-400 text-xs border-b border-gray-700">
-                      <th className="text-left py-2">Type</th>
-                      <th className="text-right py-2">Price</th>
-                      <th className="text-right py-2">Amount</th>
-                      <th className="text-right py-2">Value (USDT)</th>
-                      <th className="text-right py-2">Timestamp</th>
-                      <th className="text-right py-2">Action</th>
+                      <th className="text-left py-2 px-4">Type</th>
+                      <th className="text-right py-2 px-4">Price</th>
+                      <th className="text-right py-2 px-4">Amount</th>
+                      <th className="text-right py-2 px-4">Value (USDT)</th>
+                      <th className="text-right py-2 px-4">Timestamp</th>
+                      <th className="text-right py-2 px-4">Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {openPositions.length > 0 ? (
                       openPositions.map(position => (
-                        <tr key={position.id} className="border-b border-gray-700">
-                          <td className={`py-2 ${position.type === 'buy' ? 'text-green-500' : 'text-red-500'}`}>
+                        <tr key={position.id} className="border-b border-gray-700 hover:bg-gray-700">
+                          <td className={`py-2 px-4 ${position.type === 'buy' ? 'text-green-500' : 'text-red-500'}`}>
                             {position.type.toUpperCase()}
                           </td>
-                          <td className="text-right py-2">${position.price.toLocaleString()}</td>
-                          <td className="text-right py-2">{position.amount}</td>
-                          <td className="text-right py-2">${(position.amount * position.price).toLocaleString()}</td>
-                          <td className="text-right py-2">{new Date(position.timestamp).toLocaleTimeString()}</td>
-                          <td className="text-right py-2">
+                          <td className="text-right py-2 px-4">${position.price.toLocaleString()}</td>
+                          <td className="text-right py-2 px-4">{position.amount}</td>
+                          <td className="text-right py-2 px-4">${(position.amount * position.price).toLocaleString()}</td>
+                          <td className="text-right py-2 px-4">{new Date(position.timestamp).toLocaleTimeString()}</td>
+                          <td className="text-right py-2 px-4">
                             <button 
                               onClick={() => closePosition(position)}
                               className={`px-2 py-1 rounded text-xs ${position.type === 'buy' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
@@ -299,30 +299,30 @@ const BitcoinTradingApp = () => {
           {activeTab === 'history' && (
             <div>
               <h3 className="text-lg font-medium mb-3">Transaction History</h3>
-              <div className="overflow-y-auto max-h-64">
+              <div className="overflow-auto" style={{ maxHeight: '250px', scrollbarWidth: 'thin', scrollbarColor: '#4B5563 #1F2937' }}>
                 <table className="w-full">
-                  <thead>
+                  <thead className="sticky top-0 bg-gray-800">
                     <tr className="text-gray-400 text-xs border-b border-gray-700">
-                      <th className="text-left py-2">Type</th>
-                      <th className="text-right py-2">Price</th>
-                      <th className="text-right py-2">Amount</th>
-                      <th className="text-right py-2">Value (USDT)</th>
-                      <th className="text-right py-2">Status</th>
-                      <th className="text-right py-2">Date</th>
+                      <th className="text-left py-2 px-4">Type</th>
+                      <th className="text-right py-2 px-4">Price</th>
+                      <th className="text-right py-2 px-4">Amount</th>
+                      <th className="text-right py-2 px-4">Value (USDT)</th>
+                      <th className="text-right py-2 px-4">Status</th>
+                      <th className="text-right py-2 px-4">Date</th>
                     </tr>
                   </thead>
                   <tbody>
                     {history.length > 0 ? (
                       history.map(tx => (
-                        <tr key={tx.id} className="border-b border-gray-700">
-                          <td className={`py-2 ${tx.type === 'buy' ? 'text-green-500' : 'text-red-500'}`}>
+                        <tr key={tx.id} className="border-b border-gray-700 hover:bg-gray-700">
+                          <td className={`py-2 px-4 ${tx.type === 'buy' ? 'text-green-500' : 'text-red-500'}`}>
                             {tx.type.toUpperCase()}
                           </td>
-                          <td className="text-right py-2">${tx.price.toLocaleString()}</td>
-                          <td className="text-right py-2">{tx.amount}</td>
-                          <td className="text-right py-2">${(tx.amount * tx.price).toLocaleString()}</td>
-                          <td className="text-right py-2">{tx.status}</td>
-                          <td className="text-right py-2">{new Date(tx.timestamp).toLocaleString()}</td>
+                          <td className="text-right py-2 px-4">${tx.price.toLocaleString()}</td>
+                          <td className="text-right py-2 px-4">{tx.amount}</td>
+                          <td className="text-right py-2 px-4">${(tx.amount * tx.price).toLocaleString()}</td>
+                          <td className="text-right py-2 px-4">{tx.status}</td>
+                          <td className="text-right py-2 px-4">{new Date(tx.timestamp).toLocaleString()}</td>
                         </tr>
                       ))
                     ) : (
