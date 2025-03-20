@@ -10,6 +10,8 @@ type Position = {
   timestamp: string,
 }
 
+type HistoryPosition = Position & { status: string };
+
 type OrderDto = {
   id: number,
   type: string,
@@ -25,7 +27,7 @@ const BitcoinTradingApp = () => {
   const [priceDirection, setPriceDirection] = useState('');
   const [account, setAccount] = useState({ usdt: 10000, btc: 0.5 });
   const [openPositions, setOpenPositions] = useState<Position[]>([]);
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] = useState<HistoryPosition[]>([]);
   const [activeTab, setActiveTab] = useState('positions');
 
   useEffect(() => {
@@ -57,6 +59,7 @@ const BitcoinTradingApp = () => {
             price: order.price,
             amount: order.amount,
             timestamp: order.closed_at,
+            status: "closed",
           }));
 
     setOpenPositions(openPositions);
@@ -163,30 +166,32 @@ const BitcoinTradingApp = () => {
       });
     }
   };
-  
-  const closePosition = (position: Position) => {
-    // Close a position (either buy back or sell)
-    const updatedPositions = openPositions.filter(p => p.id !== position.id);
-    const closedPosition = {...position, status: 'closed'};
-    
-    setOpenPositions(updatedPositions);
-    setHistory([closedPosition, ...history]);
-    
-    // Update account based on position type
-    if (position.type === 'buy') {
-      // Selling a buy position
-      const revenue = position.amount * btcPrice;
-      setAccount({
-        usdt: parseFloat((account.usdt + revenue).toFixed(2)),
-        btc: parseFloat((account.btc - position.amount).toFixed(8))
+ 
+  const closePosition = async (position: Position) => {
+    try {
+      const response = await fetch("http://localhost:8000/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_id: position.id }),
       });
-    } else {
-      // Buying back a sell position
-      const cost = position.amount * btcPrice;
-      setAccount({
-        usdt: parseFloat((account.usdt - cost).toFixed(2)),
-        btc: parseFloat((account.btc + position.amount).toFixed(8))
-      });
+
+      if (!response.ok) {
+        throw new Error("Failed to close position");
+      }
+      const data = await response.json();
+
+      console.log("Closed", data)
+      // Remove the closed position from openPositions
+      const updatedPositions = openPositions.filter((p) => p.id !== position.id);
+      setOpenPositions(updatedPositions);
+
+      // Add the closed position to history; update timestamp if needed
+      const closedPosition = { ...position, status: "closed", timestamp: data.timestamp };
+      setHistory([closedPosition, ...history]);
+
+    // Account updates are handled separately via periodic refresh
+    } catch (error) {
+      console.error("Error closing position:", error);
     }
   };
 

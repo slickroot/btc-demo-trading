@@ -188,14 +188,17 @@ async def create_trade(trade: TradeRequest, background_tasks: BackgroundTasks):
         "account": {"cash_balance": account.cash_balance, "btc_balance": account.btc_balance}
     }
 
-
 @app.post("/close")
 async def close_trade(close_req: CloseRequest, background_tasks: BackgroundTasks):
     """
     Closes an open trade order.
-    Updates its status in PostgreSQL, logs the closure in MongoDB, and invalidates the cached order history.
+    Updates its status in PostgreSQL, updates the account accordingly,
+    logs the closure in MongoDB, and invalidates the cached order history.
     """
+    current_price = await fetch_live_price()
+
     async with async_session() as session:
+        # Retrieve the open order
         result = await session.execute(
             select(TradeOrder).where(TradeOrder.id == close_req.order_id, TradeOrder.status == "open")
         )
@@ -203,20 +206,48 @@ async def close_trade(close_req: CloseRequest, background_tasks: BackgroundTasks
         if order is None:
             raise HTTPException(status_code=404, detail="Open order not found")
 
+        # Fetch the account (assumes a single account exists)
+        result_account = await session.execute(select(Account))
+        account = result_account.scalars().first()
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        # Update the account based on the type of order
+        if order.type.lower() == "buy":
+            # Closing a buy order means selling the held BTC at current price
+            account.cash_balance += order.amount * current_price
+            account.btc_balance -= order.amount
+        elif order.type.lower() == "sell":
+            # Closing a sell order means buying back BTC at current price
+            account.cash_balance -= order.amount * current_price
+            account.btc_balance += order.amount
+        else:
+            raise HTTPException(status_code=400, detail="Invalid trade type")
+
+        # Mark the order as closed
         order.status = "closed"
         order.closed_at = datetime.datetime.utcnow()
+
         await session.commit()
         await session.refresh(order)
+        await session.refresh(account)
 
     log_entry = {
         "order_id": order.id,
         "action": "close",
-        "timestamp": datetime.datetime.utcnow()
+        "timestamp": datetime.datetime.utcnow(),
+        "close_price": current_price,
     }
     background_tasks.add_task(trade_logs_collection.insert_one, log_entry)
     background_tasks.add_task(invalidate_order_cache)
 
-    return {"order_id": order.id, "status": order.status}
+    return {
+        "order_id": order.id,
+        "status": order.status,
+        "timestamp": order.closed_at,
+        "account": {"cash_balance": account.cash_balance, "btc_balance": account.btc_balance},
+        "close_price": current_price,
+    }
 
 @app.get("/account", response_model=AccountResponse)
 async def get_account():
