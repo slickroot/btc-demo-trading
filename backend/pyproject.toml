@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "service"
+version = "0.1.0"
+description = "A demo trading service with live Bitcoin price and basic trade operations"
+authors = ["Marouane Elaich <elaich@gmx.net>"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.10"
+fastapi = "^0.95.0"
+uvicorn = "^0.18.0"
+httpx = "^0.23.0"
+redis = "^4.5.0"
+sqlalchemy = "^1.4.0"
+asyncpg = "^0.27.0"
+motor = "^3.2.0"
+pydantic = "^1.10.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
