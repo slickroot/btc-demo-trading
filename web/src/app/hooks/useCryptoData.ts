@@ -92,7 +92,7 @@ export const useCryptoData = () => {
     // Set interval to fetch the price every 5 seconds
     const interval = setInterval(fetchPrice, 5000);
     return () => clearInterval(interval);
-  }, [btcPrice]);
+  }, []);
 
   const handleBuy = async () => {
     const amount = 0.01;
